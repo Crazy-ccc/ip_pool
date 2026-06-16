@@ -1,0 +1,83 @@
+[
+  {
+    "name": "谷德",
+    "url": "https://www.goodips.com/?page={page}&size=45",
+    "max_page": 2,
+    "table_rule": "div.list-box > div.table-list > ul",
+    "ip_rule": "li:nth-child(1)",
+    "port_rule": "li:nth-child(2)",
+    "protocol_type_rule": "li:nth-child(4)",
+    "level_rule": "li:nth-child(5)",
+    "region_rule": "li:nth-child(3) > span",
+    "replace_rules": {}
+  },
+  {
+    "name": "66代理",
+    "url": "https://www.66daili.com/?page={page}&size=45",
+    "max_page": 2,
+    "table_rule": "div.table-sj > ul",
+    "ip_rule": "li:nth-child(1)",
+    "port_rule": "li:nth-child(2)",
+    "protocol_type_rule": "li:nth-child(5)",
+    "level_rule": "li:nth-child(4)",
+    "region_rule": "li:nth-child(3) > span",
+    "replace_rules": {}
+  },
+  {
+    "name": "快代理-国内1",
+    "url": "https://www.kuaidaili.com/free/dps/{page}",
+    "max_page": 1,
+    "table_rule": "#table__free-proxy > div > table > tbody > tr",
+    "ip_rule": "td:nth-child(1)",
+    "port_rule": "td:nth-child(2)",
+    "protocol_type_rule": "td:nth-child(4)",
+    "level_rule": "td:nth-child(9)",
+    "region_rule": "td:nth-child(5)",
+    "replace_rules": {
+      "免费代理IP": "高匿",
+      "HTTP(S)": "https"
+    }
+  },
+  {
+    "name": "快代理-国内2",
+    "url": "https://www.kuaidaili.com/free/inha/{page}",
+    "max_page": 1,
+    "table_rule": "#table__free-proxy > div > table > tbody > tr",
+    "ip_rule": "td:nth-child(1)",
+    "port_rule": "td:nth-child(2)",
+    "protocol_type_rule": "td:nth-child(4)",
+    "level_rule": "td:nth-child(9)",
+    "region_rule": "td:nth-child(5)",
+    "replace_rules": {
+      "免费代理IP": "高匿",
+      "HTTP(S)": "https"
+    }
+  },
+  {
+    "name": "快代理-国外",
+    "url": "https://www.kuaidaili.com/free/fps/{page}",
+    "max_page": 1,
+    "table_rule": "#table__free-proxy > div > table > tbody > tr",
+    "ip_rule": "td:nth-child(1)",
+    "port_rule": "td:nth-child(2)",
+    "protocol_type_rule": "td:nth-child(4)",
+    "level_rule": "td:nth-child(9)",
+    "region_rule": "td:nth-child(5)",
+    "replace_rules": {
+      "HTTP(S)": "https"
+    }
+  },
+  {
+    "name": "齐云代理",
+    "url": "https://www.qiyunip.com/freeProxy",
+    "max_page": 1,
+    "table_rule": "#proxyTable > tbody > tr",
+    "ip_rule": "th:nth-child(1)",
+    "port_rule": "th:nth-child(2)",
+    "protocol_type_rule": "th:nth-child(4)",
+    "level_rule": "th:nth-child(3)",
+    "region_rule": "th:nth-child(5)",
+    "replace_rules": {
+    }
+  }
+]
