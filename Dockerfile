@@ -1,10 +1,13 @@
 # syntax=docker/dockerfile:1
-FROM rust:slim-bookworm AS builder
+FROM rust:alpine AS builder
 
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    ca-certificates \
+    musl-dev \
+    openssl-dev \
+    pkgconfig
+
+RUN rustup update stable && rustup default stable
 
 WORKDIR /app
 
@@ -16,14 +19,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release && \
     strip target/release/ip_pool
 
-FROM debian:bookworm-slim
+FROM alpine:3.21
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates tzdata
 
-COPY --from=builder --chown=nobody:nogroup \
+COPY --from=builder --chown=nobody:nobody \
     /app/target/release/ip_pool /usr/local/bin/ip_pool
 
 USER nobody
