@@ -16,6 +16,8 @@ COPY src src/
 COPY resource resource/
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    CARGO_HTTP_MULTIPLEXING=false \
+    CARGO_NET_RETRY=5 \
     cargo build --release && \
     strip target/release/ip_pool
 
