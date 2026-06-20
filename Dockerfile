@@ -5,6 +5,7 @@ RUN apk add --no-cache \
     ca-certificates \
     musl-dev \
     openssl-dev \
+    openssl-libs-static \
     pkgconfig
 
 RUN rustup update stable && rustup default stable
@@ -16,6 +17,7 @@ COPY src src/
 COPY resource resource/
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    OPENSSL_STATIC=1 \
     CARGO_HTTP_MULTIPLEXING=false \
     CARGO_NET_RETRY=5 \
     cargo build --release && \
