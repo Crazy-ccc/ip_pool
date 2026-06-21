@@ -18,30 +18,41 @@ async fn get_ip(
     state: web::Data<AppState>,
 ) -> impl Responder {
     let query = query.into_inner();
-    // protocol_type(可选)：代理协议，http，socks4，socks5，https
-    let protocol_type = query
-        .get("protocol_type")
-        .map(|t| t.as_str())
-        .unwrap_or("http");
-    // 1→高匿，2→普匿，3→匿名，4→透明，5→未知
-    let level = query.get("level").map(|t| t.as_str()).unwrap_or("1");
-    let num = query.get("num").map(|t| t.parse().unwrap_or(1)).unwrap_or(1);
 
-    let mut results: Vec<IpDetail> = vec![];
-    for _i in 0..(10 * num) {
-        match get_ip_for_redis(state.redis.clone(), protocol_type, level).await {
-            Some(ip) => {
-                if check_ip(&ip).await {
-                    results.push(ip);
-                } else {
-                    let _ = remove_ip(state.redis.clone(), ip).await;
+    let mut search = "ip_cache::*".to_string();
+    // protocol_type(可选)：代理协议，http，socks4，socks5，https
+    if let Some(protocol_type) = query.get("protocol_type") {
+        search = format!("ip_cache::{}::*", protocol_type);
+    }
+    // 1→高匿，2→普匿，3→匿名，4→透明，5→未知
+    if let Some(level) = query.get("level") && let Some(protocol_type) = query.get("protocol_type") {
+        search = format!("ip_cache::{}::{}", protocol_type, level);
+    }
+
+    let mut conn = state.redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let keys: RedisResult<Vec<String>> =
+        AsyncCommands::keys(&mut conn, search).await;
+    let keys = match keys {
+        Ok(k) => k,
+        Err(_) => return Resp::error(404, "ip pool is null"),
+    };
+
+    for key in keys {
+        let result: RedisResult<HashMap<String, String>> =
+            AsyncCommands::hgetall(&mut conn, &key).await;
+        match result {
+            Ok(map) => {
+                for value in map.values() {
+                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value) && check_ip(&ip).await {
+                        return Resp::success(ip);
+                    }
                 }
             }
-            _ => {}
+            Err(_) => {}
         }
     }
 
-    Resp::success(results)
+    Resp::error(404, "ip pool is null")
 }
 
 async fn get_count(state: web::Data<AppState>,) -> impl Responder {
@@ -55,43 +66,34 @@ async fn get_count(state: web::Data<AppState>,) -> impl Responder {
     };
 
     for key in keys {
-        count += AsyncCommands::scard(&mut conn, key).await.unwrap_or(0);
+        count += AsyncCommands::hlen(&mut conn, key).await.unwrap_or(0);
     }
 
     Resp::success(count)
 }
 
-async fn get_ip_for_redis(
-    redis: Arc<Mutex<ConnectionManager>>,
-    protocol_type: &str,
-    level: &str,
-) -> Option<IpDetail> {
-    let mut conn = redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let key = format!("ip_cache::{}::{}", protocol_type, level);
-    let result: RedisResult<String> = AsyncCommands::srandmember(&mut conn, key).await;
-    result.ok().and_then(|r| serde_json::from_str(&r).ok())
-}
-
 pub(crate) async fn ip_in_redis(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) {
-    let (data, key, mut conn) = get_conn_and_key_data(redis, ip_detail);
+    let data = serde_json::to_string(&ip_detail).unwrap_or_else(|_| "".to_string());
 
-    let _: RedisResult<String> = AsyncCommands::sadd(&mut conn, &key, &data).await;
+    let (key, h_key,mut conn) = get_conn_and_key_data(redis, ip_detail);
+
+    let _: RedisResult<String> = AsyncCommands::hset(&mut conn, &key, &h_key, &data).await;
 }
 
 pub async fn remove_ip(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) {
-    let (data, key, mut conn) = get_conn_and_key_data(redis, ip_detail);
+    let (key, h_key, mut conn) = get_conn_and_key_data(redis, ip_detail);
 
-    let _: RedisResult<String> = AsyncCommands::srem(&mut conn, &key, &data).await;
+    let _: RedisResult<String> = AsyncCommands::hdel(&mut conn, &key, &h_key).await;
 }
 
-pub fn get_conn_and_key_data(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) -> (String, String, ConnectionManager) {
-    let data = serde_json::to_string(&ip_detail).unwrap_or_else(|_| "".to_string());
-
+fn get_conn_and_key_data(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) -> (String, String,ConnectionManager) {
     let key = format!("ip_cache::{}::{}", ip_detail.protocol_type, ip_detail.level);
+
+    let h_key = format!("{}:{}", ip_detail.ip, ip_detail.port);
 
     let conn = redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
-    (data, key, conn)
+    (key, h_key, conn)
 }
 
 pub async fn check_ip(ip_detail: &IpDetail) -> bool {
@@ -152,7 +154,7 @@ pub(crate) async fn get_all_ips(redis: Arc<Mutex<ConnectionManager>>) -> Vec<IpD
 
     for key in keys {
         let members: RedisResult<Vec<String>> =
-            AsyncCommands::smembers(&mut conn, &key).await;
+            AsyncCommands::hgetall(&mut conn, &key).await;
         let members = match members {
             Ok(m) => m,
             Err(_) => continue,
