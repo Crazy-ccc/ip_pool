@@ -83,7 +83,7 @@ async fn verify_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result
                     };
                     ip_cache::ip_in_redis(redis.clone(), ok).await;
                 } else {
-                    ip_cache::ip_in_redis(redis.clone(), IpDetail::died(ip)).await;
+                    ip_cache::remove_ip(redis.clone(), ip).await;
                 }
             }));
         }

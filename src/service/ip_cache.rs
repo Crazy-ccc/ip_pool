@@ -34,7 +34,7 @@ async fn get_ip(
                 if check_ip(&ip).await {
                     results.push(ip);
                 } else {
-                    let _ = ip_in_redis(state.redis.clone(), IpDetail::died(ip)).await;
+                    let _ = remove_ip(state.redis.clone(), ip).await;
                 }
             }
             _ => {}
@@ -73,19 +73,25 @@ async fn get_ip_for_redis(
 }
 
 pub(crate) async fn ip_in_redis(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) {
-    let data = match serde_json::to_string(&ip_detail) {
-        Ok(d) => d,
-        Err(_) => return,
-    };
+    let (data, key, mut conn) = get_conn_and_key_data(redis, ip_detail);
+
+    let _: RedisResult<String> = AsyncCommands::sadd(&mut conn, &key, &data).await;
+}
+
+pub async fn remove_ip(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) {
+    let (data, key, mut conn) = get_conn_and_key_data(redis, ip_detail);
+
+    let _: RedisResult<String> = AsyncCommands::srem(&mut conn, &key, &data).await;
+}
+
+pub fn get_conn_and_key_data(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) -> (String, String, ConnectionManager) {
+    let data = serde_json::to_string(&ip_detail).unwrap_or_else(|_| "".to_string());
 
     let key = format!("ip_cache::{}::{}", ip_detail.protocol_type, ip_detail.level);
 
-    let mut conn = redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    if ip_detail.is_live {
-        let _: RedisResult<String> = AsyncCommands::sadd(&mut conn, &key, &data).await;
-    } else {
-        let _: RedisResult<String> = AsyncCommands::srem(&mut conn, &key, &data).await;
-    }
+    let conn = redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
+
+    (data, key, conn)
 }
 
 pub async fn check_ip(ip_detail: &IpDetail) -> bool {
