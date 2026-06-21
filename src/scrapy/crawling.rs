@@ -63,7 +63,7 @@ fn normalize_level(text: &str) -> String {
     .to_string()
 }
 
-pub async fn crawling(rule: CrawlingRule) -> Vec<IpDetail> {
+pub async fn crawling(rule: &CrawlingRule) -> Vec<IpDetail> {
     let mut results = Vec::new();
 
     let client = match reqwest::Client::builder()
@@ -134,7 +134,7 @@ mod test {
         let rules: Vec<CrawlingRule> = serde_json::from_str(json_str).unwrap();
 
         for rule in &rules {
-            let result = crawling(rule.clone()).await;
+            let result = crawling(&rule).await;
             println!("{}", result.len());
             assert!(!result.is_empty(), "should crawl at least one ip for rule");
             for ip in &result {

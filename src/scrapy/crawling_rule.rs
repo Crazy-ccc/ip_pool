@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CrawlingRule {
+    pub name: String,
     // 抓取地址
     pub url: String,
     // 最大抓取页数

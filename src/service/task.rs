@@ -39,8 +39,8 @@ async fn crawl_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result<
             .map_err(|e| format!("parse crawling_rules.json error: {}", e))?;
 
         for rule in rules {
-            let ips = crawling::crawling(rule).await;
-            info!("crawled {} ips", ips.len());
+            let ips = crawling::crawling(&rule).await;
+            info!("rule {} crawled {} ips", &rule.name, ips.len());
 
             let mut handles = Vec::new();
             for ip in ips {
