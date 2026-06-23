@@ -129,7 +129,7 @@ pub async fn check_ip(ip_detail: &IpDetail) -> bool {
 
     let client = match reqwest::Client::builder()
         .proxy(proxy)
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
         .build()
     {
         Ok(c) => c,

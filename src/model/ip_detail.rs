@@ -18,13 +18,23 @@ pub struct IpDetail {
     pub is_live: bool,
     // 校验次数
     pub verify_count: u32,
+    // 死亡校验次数 超过10次后删除
+    pub die_verify_count: u32,
 }
 
 impl IpDetail {
+    pub fn live(self: Self) -> IpDetail {
+        Self {
+            is_live: true,
+            verify_count: self.verify_count + 1,
+            live_time: self.live_time + 10 * 60 * 1000,
+            ..self
+        }
+    }
     pub fn died(self: Self) -> Self {
         Self {
             is_live: false,
-            verify_count: self.verify_count + 1,
+            die_verify_count: self.die_verify_count + 1,
             ..self
         }
     }

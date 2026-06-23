@@ -76,11 +76,10 @@ async fn verify_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result
             let redis = redis.clone();
             handles.push(pool.spawn(async move {
                 if ip_cache::check_ip(&ip).await {
-                    let ok = IpDetail {
-                        verify_count: ip.verify_count + 1,
-                        live_time: ip.live_time + 10 * 60 * 1000,
-                        ..ip
-                    };
+                    let ok = IpDetail::live(ip);
+                    ip_cache::ip_in_redis(redis.clone(), ok).await;
+                } else if ip.die_verify_count < 10 {
+                    let ok = IpDetail::died(ip);
                     ip_cache::ip_in_redis(redis.clone(), ok).await;
                 } else {
                     ip_cache::remove_ip(redis.clone(), ip).await;

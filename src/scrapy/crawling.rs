@@ -116,6 +116,7 @@ pub async fn crawling(rule: &CrawlingRule) -> Vec<IpDetail> {
                 live_time: 0,
                 is_live: true,
                 verify_count: 0,
+                die_verify_count: 0,
             });
         }
     }
