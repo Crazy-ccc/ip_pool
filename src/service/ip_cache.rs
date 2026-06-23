@@ -43,7 +43,9 @@ async fn get_ip(
         match result {
             Ok(map) => {
                 for value in map.values() {
-                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value) && check_ip(&ip).await {
+                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value)
+                        && ip.is_live
+                        && check_ip(&ip).await {
                         return Resp::success(ip);
                     }
                 }
