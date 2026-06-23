@@ -72,6 +72,10 @@ async fn get_count(state: web::Data<AppState>,) -> impl Responder {
     Resp::success(count)
 }
 
+pub async fn get_live_count(redis: Arc<Mutex<ConnectionManager>>) -> usize {
+    get_all_ips(redis).await.iter().filter(|ip| ip.is_live).count()
+}
+
 pub(crate) async fn ip_in_redis(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) {
     let data = serde_json::to_string(&ip_detail).unwrap_or_else(|_| "".to_string());
 

@@ -54,6 +54,20 @@
     }
   },
   {
+    "name": "站大爷-国外",
+    "url": "https://www.zdaye.com/guowai_free/{page}/",
+    "max_page": 2,
+    "table_rule": "div.ip-table-body > ul.ul-row",
+    "ip_rule": "li:nth-child(1) > p.proxy_ip",
+    "port_rule": "li:nth-child(1) > p.proxy_port",
+    "protocol_type_rule": "li:nth-child(2) > p.proxy_protocol > span",
+    "level_rule": "li:nth-child(2) > p.proxy_level",
+    "region_rule": "li:nth-child(3)",
+    "replace_rules": {
+      "Port：": ""
+    }
+  },
+  {
     "name": "快代理-国外",
     "url": "https://www.kuaidaili.com/free/fps/{page}",
     "max_page": 1,
@@ -78,6 +92,20 @@
     "level_rule": "th:nth-child(3)",
     "region_rule": "th:nth-child(5)",
     "replace_rules": {
+    }
+  },
+  {
+    "name": "站大爷-国内",
+    "url": "https://www.zdaye.com/free/{page}/",
+    "max_page": 1,
+    "table_rule": "div.ip-table-body > ul.ul-row",
+    "ip_rule": "li:nth-child(1) > p.proxy_ip",
+    "port_rule": "li:nth-child(1) > p.proxy_port",
+    "protocol_type_rule": "li:nth-child(2) > p.proxy_protocol > span",
+    "level_rule": "li:nth-child(2) > p.proxy_level",
+    "region_rule": "li:nth-child(3)",
+    "replace_rules": {
+      "Port：": ""
     }
   }
 ]

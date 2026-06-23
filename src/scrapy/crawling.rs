@@ -77,7 +77,10 @@ pub async fn crawling(rule: &CrawlingRule) -> Vec<IpDetail> {
     for page in 1..=rule.max_page {
         let url = rule.url.replace("{page}", &page.to_string());
 
-        let html = match client.get(&url).send().await {
+        let html = match client.get(&url)
+            .header("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+            .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0")
+            .send().await {
             Ok(resp) if resp.status().is_success() => match resp.text().await {
                 Ok(t) => t,
                 Err(_) => continue,

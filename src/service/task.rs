@@ -12,7 +12,7 @@ pub fn start(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) {
     let mut counter = 0;
     tokio::spawn(async move {
         loop {
-            if counter % 72 == 0 || ip_cache::get_all_ips(redis.clone()).await.len() == 0 {
+            if counter % 72 == 0 || ip_cache::get_live_count(redis.clone()).await <= 0 {
                 if let Err(e) = crawl_task(redis.clone(), pool.clone()).await {
                     error!("crawl_task exited: {}, restart in 60s", e);
                 }
@@ -55,7 +55,7 @@ async fn crawl_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result<
         }
     }
 
-    info!("crawl task done, sleep 12h");
+    info!("crawl task done");
 
     Ok(())
 }
