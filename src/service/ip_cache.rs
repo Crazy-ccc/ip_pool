@@ -43,7 +43,7 @@ async fn get_ip(
         match result {
             Ok(map) => {
                 for value in map.values() {
-                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value) && check_ip(&ip).await {
+                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value) && check_ip(&ip, false).await {
                         return Resp::success(ip);
                     }
                 }
@@ -100,23 +100,13 @@ fn get_conn_and_key_data(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDeta
     (key, h_key, conn)
 }
 
-pub async fn check_ip(ip_detail: &IpDetail) -> bool {
+pub async fn check_ip(ip_detail: &IpDetail, ignore_live: bool) -> bool {
     if ip_detail.ip.is_empty() || ip_detail.port.is_empty() {
         return false;
     }
 
-    if !ip_detail.is_live {
+    if !ignore_live && !ip_detail.is_live {
         return false;
-    }
-
-    if ip_detail.live_time > 0 {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        if now > ip_detail.crawling_time + ip_detail.live_time {
-            return false;
-        }
     }
 
     let proxy_url = match ip_detail.protocol_type.as_str() {

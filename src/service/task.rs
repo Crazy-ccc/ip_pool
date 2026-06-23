@@ -43,7 +43,7 @@ async fn crawl_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result<
         for ip in ips {
             let redis = redis.clone();
             handles.push(pool.spawn(async move {
-                if ip_cache::check_ip(&ip).await {
+                if ip_cache::check_ip(&ip, true).await {
                     ip_cache::ip_in_redis(redis.clone(), ip).await;
                 }
             }));
@@ -70,7 +70,7 @@ async fn verify_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result
     for ip in ips {
         let redis = redis.clone();
         handles.push(pool.spawn(async move {
-            if ip_cache::check_ip(&ip).await {
+            if ip_cache::check_ip(&ip, true).await {
                 let ok = IpDetail::live(ip);
                 ip_cache::ip_in_redis(redis.clone(), ok).await;
             } else if ip.die_verify_count < 10 {
