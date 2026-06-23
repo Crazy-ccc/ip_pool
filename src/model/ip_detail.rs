@@ -28,12 +28,15 @@ impl IpDetail {
             is_live: true,
             verify_count: self.verify_count + 1,
             live_time: self.live_time + 10 * 60 * 1000,
+            die_verify_count: 0,
             ..self
         }
     }
     pub fn died(self: Self) -> Self {
         Self {
             is_live: false,
+            verify_count: 0,
+            live_time: 0,
             die_verify_count: self.die_verify_count + 1,
             ..self
         }
