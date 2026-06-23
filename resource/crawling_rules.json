@@ -55,7 +55,7 @@
   },
   {
     "name": "站大爷-国外",
-    "url": "https://www.zdaye.com/guowai_free/{page}/",
+    "url": "https://www.zdaye.com/free_haiwai/{page}/",
     "max_page": 2,
     "table_rule": "div.ip-table-body > ul.ul-row",
     "ip_rule": "li:nth-child(1) > p.proxy_ip",

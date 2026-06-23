@@ -43,7 +43,7 @@ async fn get_ip(
         match result {
             Ok(map) => {
                 for value in map.values() {
-                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value) && check_ip(&ip, false).await {
+                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value) && check_ip(&ip).await {
                         return Resp::success(ip);
                     }
                 }
@@ -100,12 +100,8 @@ fn get_conn_and_key_data(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDeta
     (key, h_key, conn)
 }
 
-pub async fn check_ip(ip_detail: &IpDetail, ignore_live: bool) -> bool {
+pub async fn check_ip(ip_detail: &IpDetail) -> bool {
     if ip_detail.ip.is_empty() || ip_detail.port.is_empty() {
-        return false;
-    }
-
-    if !ignore_live && !ip_detail.is_live {
         return false;
     }
 
@@ -123,7 +119,7 @@ pub async fn check_ip(ip_detail: &IpDetail, ignore_live: bool) -> bool {
 
     let client = match reqwest::Client::builder()
         .proxy(proxy)
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(5))
         .build()
     {
         Ok(c) => c,
