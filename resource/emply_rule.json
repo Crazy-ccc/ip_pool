@@ -10,19 +10,6 @@
     "level_rule": "",
     "region_rule": "",
     "replace_rules": {
-
     }
-  },
-  {
-    "name": "云代理",
-    "url": "http://www.ip3366.net/free/?stype=1&page={page}",
-    "max_page": 1,
-    "table_rule": "div.list > table > tbody > tr",
-    "ip_rule": "td::nth-child(1)",
-    "port_rule": "td::nth-child(2)",
-    "protocol_type_rule": "td::nth-child(4)",
-    "level_rule": "td::nth-child(3)",
-    "region_rule": "td::nth-child(5)",
-    "replace_rules": {}
   }
 ]

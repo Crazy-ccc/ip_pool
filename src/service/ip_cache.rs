@@ -7,6 +7,21 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+const VERIFY_TARGETS: &[&str] = &[
+    "https://www.baidu.com",
+    "https://httpbin.org/ip",
+    "http://www.google.com",
+];
+
+fn is_valid_ip(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('.').collect();
+    parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().ok().is_some())
+}
+
+fn is_valid_port(s: &str) -> bool {
+    s.parse::<u16>().map_or(false, |p| p > 0)
+}
+
 pub fn service() -> Scope {
     web::scope("/cache")
         .route("/ip", web::get().to(get_ip))
@@ -20,11 +35,9 @@ async fn get_ip(
     let query = query.into_inner();
 
     let mut search = "ip_cache::*".to_string();
-    // protocol_type(可选)：代理协议，http，socks4，socks5，https
     if let Some(protocol_type) = query.get("protocol_type") {
         search = format!("ip_cache::{}::*", protocol_type);
     }
-    // 1→高匿，2→普匿，3→匿名，4→透明，5→未知
     if let Some(level) = query.get("level") && let Some(protocol_type) = query.get("protocol_type") {
         search = format!("ip_cache::{}::{}", protocol_type, level);
     }
@@ -103,7 +116,11 @@ fn get_conn_and_key_data(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDeta
 }
 
 pub async fn check_ip(ip_detail: &IpDetail) -> bool {
-    if ip_detail.ip.is_empty() || ip_detail.port.is_empty() {
+    if ip_detail.ip.is_empty()
+        || ip_detail.port.is_empty()
+        || !is_valid_ip(&ip_detail.ip)
+        || !is_valid_port(&ip_detail.port)
+    {
         return false;
     }
 
@@ -121,17 +138,28 @@ pub async fn check_ip(ip_detail: &IpDetail) -> bool {
 
     let client = match reqwest::Client::builder()
         .proxy(proxy)
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(8))
+        .connect_timeout(Duration::from_secs(3))
         .build()
     {
         Ok(c) => c,
         Err(_) => return false,
     };
 
-    match client.get("https://www.baidu.com").send().await {
-        Ok(resp) => resp.status().is_success(),
-        Err(_) => false,
-    }
+    let h1 = tokio::spawn({
+        let c = client.clone();
+        async move { c.get(VERIFY_TARGETS[0]).send().await.map_or(false, |r| r.status().is_success()) }
+    });
+    let h2 = tokio::spawn({
+        let c = client.clone();
+        async move { c.get(VERIFY_TARGETS[1]).send().await.map_or(false, |r| r.status().is_success()) }
+    });
+    let h3 = tokio::spawn({
+        let c = client.clone();
+        async move { c.get(VERIFY_TARGETS[2]).send().await.map_or(false, |r| r.status().is_success()) }
+    });
+
+    h1.await.unwrap_or(false) || h2.await.unwrap_or(false) || h3.await.unwrap_or(false)
 }
 
 pub(crate) async fn get_all_ips(redis: Arc<Mutex<ConnectionManager>>) -> Vec<IpDetail> {

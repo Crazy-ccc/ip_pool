@@ -63,7 +63,65 @@ fn normalize_level(text: &str) -> String {
     .to_string()
 }
 
-pub async fn crawling(rule: &CrawlingRule) -> Vec<IpDetail> {
+fn make_detail(ip: String, port: String, protocol_type: String, level: String) -> IpDetail {
+    IpDetail {
+        ip,
+        port,
+        protocol_type,
+        level,
+        region: String::new(),
+        crawling_time: now_millis(),
+        live_time: 0,
+        is_live: true,
+        verify_count: 0,
+        die_verify_count: 0,
+    }
+}
+
+fn parse_raw_line(line: &str, rule: &CrawlingRule) -> Option<IpDetail> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = line.strip_suffix("://") {
+        // protocol://ip:port
+        let proto_end = line.len() - rest.len();
+        let proto = &line[..proto_end - 3];
+        let addr = &line[proto_end..];
+        if let Some((ip, port)) = addr.split_once(':') {
+            return Some(make_detail(ip.to_string(), port.to_string(), proto.to_string(), rule.level_rule.clone()));
+        }
+        return None;
+    }
+
+    let (ip, port) = line.split_once(':')?;
+    Some(make_detail(ip.to_string(), port.to_string(), rule.protocol_type_rule.clone(), rule.level_rule.clone()))
+}
+
+async fn crawling_raw(rule: &CrawlingRule) -> Vec<IpDetail> {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let text = match client.get(&rule.url)
+        .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0")
+        .send().await {
+        Ok(resp) if resp.status().is_success() => match resp.text().await {
+            Ok(t) => t,
+            Err(_) => return Vec::new(),
+        },
+        _ => return Vec::new(),
+    };
+
+    text.lines().filter_map(|s| parse_raw_line(s, rule)).collect()
+}
+
+async fn crawling_html(rule: &CrawlingRule) -> Vec<IpDetail> {
     let mut results = Vec::new();
 
     let client = match reqwest::Client::builder()
@@ -125,6 +183,13 @@ pub async fn crawling(rule: &CrawlingRule) -> Vec<IpDetail> {
     }
 
     results
+}
+
+pub async fn crawling(rule: &CrawlingRule) -> Vec<IpDetail> {
+    match rule.source_type.as_str() {
+        "raw" => crawling_raw(rule).await,
+        _ => crawling_html(rule).await,
+    }
 }
 
 #[cfg(test)]

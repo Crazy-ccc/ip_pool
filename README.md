@@ -4,10 +4,10 @@
 
 ## 功能
 
-- **定时爬取**：从多个免费代理网站爬取代理 IP（谷德、66代理、快代理、齐云代理等）
+- **定时爬取**：从 18 个数据源爬取代理 IP（10 个 HTML 网站 + 8 个 GitHub 原始 TXT 文件）
 - **自动验证**：定时验证代理可用性，失效代理自动剔除（连续 10 次检测失败后删除）
 - **HTTP API**：提供 RESTful API 获取可用代理，支持按协议类型和匿名度筛选
-- **信号量并发控制**：使用 `tokio::sync::Semaphore` 控制爬取与验证的并发数
+- **并发控制**：基于 `tokio::sync::Semaphore` + `JoinSet` 的线程池，按完成顺序处理任务
 - **Docker 支持**：一键容器化部署
 
 ## 技术栈
@@ -137,11 +137,12 @@ GET /cache/count
 | 爬取间隔 | 硬编码（`task.rs`） | 12 小时 |
 | 验证间隔 | 硬编码（`task.rs`） | 10 分钟 |
 | 并发上限 | 硬编码（`main.rs`） | 4 |
-| 代理验证超时 | 硬编码（`ip_cache.rs`） | 10 秒 |
+| 代理验证超时 | 硬编码（`ip_cache.rs`） | 8 秒 |
+| 连接超时 | 硬编码（`ip_cache.rs`） | 3 秒 |
 | 爬取超时 | 硬编码（`crawling.rs`） | 10 秒 |
 | 失败重启等待 | 硬编码（`task.rs`） | 60 秒 |
 | 最大死亡验证次数 | 硬编码（`task.rs`） | 10 |
-| 爬取规则 | `resource/crawling_rules.json` | 6 条规则 |
+| 爬取规则 | `resource/crawling_rules.json` | 18 条规则（10 HTML + 8 Raw） |
 
 ## 项目结构
 
@@ -162,11 +163,11 @@ GET /cache/count
     │   └── ip_detail.rs      # IpDetail 数据模型
     ├── scrapy/
     │   ├── mod.rs
-    │   ├── crawling_rule.rs  # CrawlingRule 爬取规则结构体
-    │   └── crawling.rs       # 爬取引擎：HTML 解析与字段提取
+    │   ├── crawling_rule.rs  # CrawlingRule 爬取规则结构体（含 source_type）
+    │   └── crawling.rs       # 爬取引擎：HTML 解析 + Raw TXT 解析
     └── service/
         ├── mod.rs
-        ├── pool.rs           # Pool 信号量并发控制
+        ├── pool.rs           # Pool Semaphore + JoinSet 并发池
         ├── ip_cache.rs       # API 路由 & Redis 缓存操作
         └── task.rs           # 后台爬取 + 验证定时任务
 ```
@@ -204,19 +205,20 @@ pub struct IpDetail {
 
 ### scrapy/crawling_rule.rs — 爬取规则
 
-从 JSON 反序列化的爬取规则，包含站点名称、URL 模板（`{page}` 占位符）、最大页数、CSS 选择器规则和文本替换规则。
+从 JSON 反序列化的爬取规则，包含站点名称、URL 模板（`{page}` 占位符）、最大页数、`source_type`（html / raw）、CSS 选择器规则和文本替换规则。`source_type` 使用 `#[serde(default)]` 兼容旧配置。
 
 ### scrapy/crawling.rs — 爬取引擎
 
-- 使用 `reqwest` 请求目标页面，`scraper` 解析 HTML
-- 按规则提取 IP、端口、协议类型、匿名度、地区
+- `crawling()`：根据规则的 `source_type` 分发到 `crawling_html()` 或 `crawling_raw()`
+- `crawling_html()`：使用 `reqwest` + `scraper` 解析 HTML，按 CSS 选择器提取 IP、端口、协议、匿名度、地区
+- `crawling_raw()`：直接请求 GitHub 原始 TXT 文件，按行解析 `ip:port` 格式
 - 协议类型归一化：`http` / `https` / `socks4` / `socks5`
-- 匿名度归一化：支持中文描述映射为 1~5 的数字
+- 匿名度归一化：支持中文描述映射为 1~5 的数字（HTML 源）
 - 超时 10 秒
 
 ### service/pool.rs — 信号量并发池
 
-基于 `tokio::sync::Semaphore` 实现，限制同时执行的任务数，防止对目标站点造成过大压力。
+基于 `tokio::sync::Semaphore` + `tokio::task::JoinSet` 实现。内部使用 `JoinSet` 管理所有已提交任务，`join()` 通过 `join_next()` 按完成顺序轮询，有效任务完成的 IP 不被未完成的前序任务阻塞。
 
 ### service/ip_cache.rs — 缓存操作 & API
 
@@ -233,7 +235,7 @@ value: JSON 序列化的 IpDetail
 | 函数 | 可见性 | 说明 |
 |---|---|---|
 | `service()` | `pub` | 注册 `/cache/ip` 与 `/cache/count` 路由 |
-| `check_ip()` | `pub` | 通过代理请求 `https://www.baidu.com` 验证可用性 |
+| `check_ip()` | `pub` | 格式预检后，通过代理并发请求 3 个目标（baidu / httpbin / google），任一成功即判活 |
 | `ip_in_redis()` | `pub(crate)` | 将代理写入 Redis Hash |
 | `remove_ip()` | `pub` | 从 Redis Hash 中删除代理 |
 | `get_all_ips()` | `pub(crate)` | 获取所有缓存代理用于批量验证 |

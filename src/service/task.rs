@@ -40,23 +40,18 @@ async fn crawl_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result<
         let ips = crawling::crawling(&rule).await;
         info!("rule {} crawled {} ips", &rule.name, ips.len());
 
-        let mut handles = Vec::new();
         for ip in ips {
             let redis = redis.clone();
             let c1 = counter.clone();
-            handles.push(pool.spawn(async move {
+            pool.spawn(async move {
                 if ip_cache::check_ip(&ip).await {
                     ip_cache::ip_in_redis(redis.clone(), ip).await;
                     let mut count = c1.lock().unwrap();
                     *count += 1;
                 }
-            }));
+            });
         }
-        for h in handles {
-            if let Err(e) = h.await {
-                error!("crawl verify subtask failed: {}", e);
-            }
-        }
+        pool.join().await;
     }
 
     info!("crawl task done, {} ip success", counter.lock().unwrap());
@@ -71,11 +66,10 @@ async fn verify_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result
     info!("got {} ips to verify", ips.len());
 
     let counter = Arc::new(Mutex::new(0));
-    let mut handles = Vec::new();
     for ip in ips {
         let redis = redis.clone();
         let c1 = counter.clone();
-        handles.push(pool.spawn(async move {
+        pool.spawn(async move {
             if ip_cache::check_ip(&ip).await {
                 let ok = IpDetail::live(ip);
                 ip_cache::ip_in_redis(redis.clone(), ok).await;
@@ -87,13 +81,9 @@ async fn verify_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result
             } else {
                 ip_cache::remove_ip(redis.clone(), ip).await;
             }
-        }));
+        });
     }
-    for h in handles {
-        if let Err(e) = h.await {
-            error!("verify subtask failed: {}", e);
-        }
-    }
+    pool.join().await;
 
     info!("verify task done, {} ips success", counter.lock().unwrap());
     Ok(())

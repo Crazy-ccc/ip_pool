@@ -1,3 +1,4 @@
+use std::env;
 use actix_web::{App, HttpResponse, HttpServer, guard, web};
 use ip_pool::AppState;
 use ip_pool::db::redis::connect_redis;
@@ -6,10 +7,12 @@ use ip_pool::service::pool::Pool;
 use log::error;
 use std::sync::{Arc, Mutex};
 
+const POOL_SIZE: usize = 4;
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     unsafe {
-        std::env::set_var("RUST_LOG", "actix_web=info,ip_pool=info");
+        env::set_var("RUST_LOG", "actix_web=info,ip_pool=info");
     }
     env_logger::init();
 
@@ -22,7 +25,8 @@ async fn main() -> std::io::Result<()> {
     };
 
     let redis = Arc::new(Mutex::new(redis));
-    let pool = Pool::new(4);
+    let size: usize = env::var("POOL_SIZE").map(|s| { s.parse().unwrap_or(POOL_SIZE) }).unwrap_or(POOL_SIZE);
+    let pool = Pool::new(size);
 
     task::start(redis.clone(), pool);
 

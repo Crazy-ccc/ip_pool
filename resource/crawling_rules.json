@@ -107,5 +107,109 @@
     "replace_rules": {
       "Port：": ""
     }
+  },
+  {
+    "name": "GH-SyscallH00k-HTTP",
+    "url": "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "http",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
+  },
+  {
+    "name": "GH-SyscallH00k-HTTPS",
+    "url": "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/https.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "https",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
+  },
+  {
+    "name": "GH-SyscallH00k-SOCKS4",
+    "url": "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/socks4.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "socks4",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
+  },
+  {
+    "name": "GH-SyscallH00k-SOCKS5",
+    "url": "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/socks5.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "socks5",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
+  },
+  {
+    "name": "GH-Thordata-HTTP",
+    "url": "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxies/http.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "http",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
+  },
+  {
+    "name": "GH-Thordata-HTTPS",
+    "url": "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxies/https.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "https",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
+  },
+  {
+    "name": "GH-Thordata-SOCKS4",
+    "url": "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxies/socks4.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "socks4",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
+  },
+  {
+    "name": "GH-Thordata-SOCKS5",
+    "url": "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxies/socks5.txt",
+    "max_page": 1,
+    "source_type": "raw",
+    "table_rule": "",
+    "ip_rule": "",
+    "port_rule": "",
+    "protocol_type_rule": "socks5",
+    "level_rule": "5",
+    "region_rule": "",
+    "replace_rules": {}
   }
 ]
