@@ -118,6 +118,9 @@ async fn crawling_raw(rule: &CrawlingRule) -> Vec<IpDetail> {
         _ => return Vec::new(),
     };
 
+    if let Some(max_size) = rule.max_size {
+        return text.lines().take(max_size).filter_map(|l| parse_raw_line(l, &rule)).collect();
+    }
     text.lines().filter_map(|s| parse_raw_line(s, rule)).collect()
 }
 

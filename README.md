@@ -1,14 +1,15 @@
 # IP Pool
 
-基于 Rust 的代理 IP 池系统，定时爬取免费代理网站，自动验证可用性并提供 HTTP API 获取代理。
+基于 Rust 的代理 IP 池系统，定时爬取免费代理网站，自动验证可用性并提供 HTTP API 获取可用代理。
 
 ## 功能
 
-- **定时爬取**：从 18 个数据源爬取代理 IP（10 个 HTML 网站 + 8 个 GitHub 原始 TXT 文件）
-- **自动验证**：定时验证代理可用性，失效代理自动剔除（连续 10 次检测失败后删除）
-- **HTTP API**：提供 RESTful API 获取可用代理，支持按协议类型和匿名度筛选
-- **并发控制**：基于 `tokio::sync::Semaphore` + `JoinSet` 的线程池，按完成顺序处理任务
-- **Docker 支持**：一键容器化部署
+- **定时爬取**：从 18 个数据源（10 个 HTML 网站 + 8 个 GitHub 原始 TXT 文件）爬取代理 IP
+- **自动验证**：每 10 分钟验证代理可用性，连续 10 次检测失败后自动删除
+- **HTTP API**：提供 `GET /cache/ip` 和 `GET /cache/count` 接口，支持按协议和匿名度筛选
+- **并发控制**：基于 `Semaphore` + `JoinSet` 的并发池，按完成顺序处理任务
+- **实时校验**：每次返回代理前发起 3 路并发请求（百度 / httpbin / Google）验证可用性
+- **Docker 支持**：多阶段构建，镜像仅 20MB+
 
 ## 技术栈
 
@@ -17,8 +18,8 @@
 | 语言 | Rust 2024 edition |
 | Web 框架 | actix-web 4 |
 | 数据存储 | Redis (Hash) |
-| HTTP 客户端 | reqwest（支持 SOCKS） |
-| HTML 解析 | scraper |
+| HTTP 客户端 | reqwest（支持 SOCKS 代理） |
+| HTML 解析 | scraper（CSS 选择器） |
 | 运行时 | tokio |
 
 ## 快速开始
@@ -48,7 +49,10 @@ cargo run --release
 ### Docker
 
 ```bash
+# 构建镜像
 docker build -t ip_pool .
+
+# 运行（需确保 Redis 可访问）
 docker run -e REDIS_URL=redis://host.docker.internal:6379 -p 8080:8080 ip_pool
 ```
 
@@ -70,16 +74,22 @@ cargo test
 GET /cache/ip
 ```
 
-查询参数：
+**查询参数：**
 
 | 参数 | 类型 | 说明 | 默认值 |
 |---|---|---|---|
-| `protocol_type` | string | 代理协议：http / https / socks4 / socks5 | 所有协议 |
-| `level` | string | 匿名度：1(高匿) / 2(普匿) / 3(匿名) / 4(透明) / 5(未知) | 所有级别 |
+| `protocol_type` | string | 协议：`http` / `https` / `socks4` / `socks5` | 全部 |
+| `level` | string | 匿名度：`1`(高匿) / `2`(普匿) / `3`(匿名) / `4`(透明) / `5`(未知) | 全部 |
 
-> 仅当同时提供 `protocol_type` 和 `level` 时才会精确匹配到具体分组；只提供 `protocol_type` 时匹配该协议下的所有级别。
+参数组合行为：
 
-响应示例：
+| `protocol_type` | `level` | 匹配范围 |
+|---|---|---|
+| 无 | 无 | 所有协议 × 所有级别 |
+| `http` | 无 | `ip_cache::http::*` 所有级别 |
+| `http` | `1` | `ip_cache::http::1` 精确分组 |
+
+**响应示例：**
 
 ```json
 {
@@ -100,7 +110,7 @@ GET /cache/ip
 }
 ```
 
-返回的代理会经过实时可用性验证，确保返回的 IP 真实可用。如无可用代理则返回：
+返回的代理经过实时可用性验证，确保真实可用。如无可用代理则返回：
 
 ```json
 {
@@ -116,7 +126,7 @@ GET /cache/ip
 GET /cache/count
 ```
 
-响应示例：
+返回 Redis 中所有缓存代理的总数（含失效）：
 
 ```json
 {
@@ -126,123 +136,143 @@ GET /cache/count
 }
 ```
 
-返回所有协议和级别下的代理总数（包括已失效的）。
+## Redis 数据模型
+
+```
+Key:     ip_cache::{protocol_type}::{level}
+         例如: ip_cache::http::1
+Field:   {ip}:{port}
+         例如: 123.45.67.89:8080
+Value:   JSON 序列化的 IpDetail
+```
+
+## 数据源
+
+### HTML 源（10 个）
+
+| 站点（名称） | URL | 页数 |
+|---|---|---|
+| 谷德 | goodips.com | 2 |
+| 66 代理 | 66daili.com | 2 |
+| 快代理-国内1 | kuaidaili.com/dps | 1 |
+| 快代理-国内2 | kuaidaili.com/inha | 1 |
+| 站大爷-国外 | zdaye.com/free_haiwai | 2 |
+| 快代理-国外 | kuaidaili.com/fps | 1 |
+| 齐云代理 | qiyunip.com | 1 |
+| 站大爷-国内 | zdaye.com/free | 1 |
+
+### Raw TXT 源（8 个）
+
+| 名称 | 协议 |
+|---|---|
+| SyscallH00k HTTP / HTTPS / SOCKS4 / SOCKS5 | 4 |
+| Thordata HTTP / HTTPS / SOCKS4 / SOCKS5 | 4 |
 
 ## 配置
 
 | 配置项 | 方式 | 默认值 |
 |---|---|---|
-| Redis 地址 | `REDIS_URL` 环境变量 | `redis://127.0.0.1:6379` |
-| 日志级别 | `RUST_LOG` 环境变量 | `actix_web=info,ip_pool=info` |
-| 爬取间隔 | 硬编码（`task.rs`） | 12 小时 |
-| 验证间隔 | 硬编码（`task.rs`） | 10 分钟 |
+| Redis 地址 | 环境变量 `REDIS_URL` | `redis://127.0.0.1:6379` |
+| 日志级别 | 环境变量 `RUST_LOG` | `actix_web=info,ip_pool=info` |
 | 并发上限 | 硬编码（`main.rs`） | 4 |
+| 爬取间隔 | 硬编码（`task.rs`） | 每 72 次验证循环（约 12h） |
+| 验证间隔 | 硬编码（`task.rs`） | 10 分钟 |
 | 代理验证超时 | 硬编码（`ip_cache.rs`） | 8 秒 |
 | 连接超时 | 硬编码（`ip_cache.rs`） | 3 秒 |
-| 爬取超时 | 硬编码（`crawling.rs`） | 10 秒 |
-| 失败重启等待 | 硬编码（`task.rs`） | 60 秒 |
+| 爬取超时（HTML） | 硬编码（`crawling.rs`） | 10 秒 |
+| 爬取超时（Raw） | 硬编码（`crawling.rs`） | 15 秒 |
 | 最大死亡验证次数 | 硬编码（`task.rs`） | 10 |
-| 爬取规则 | `resource/crawling_rules.json` | 18 条规则（10 HTML + 8 Raw） |
+| 爬取规则 | `resource/crawling_rules.json`（编译时嵌入） | 18 条 |
 
 ## 项目结构
 
 ```
 ├── Cargo.toml
-├── Dockerfile
+├── Dockerfile                          # 多阶段构建
 ├── resource/
-│   ├── crawling_rules.json   # 爬取规则（编译时嵌入）
-│   └── emply_rule.json       # 爬取规则（备用，未使用）
+│   ├── crawling_rules.json             # 爬取规则（编译时嵌入）
+│   └── emply_rule.json                 # 备用模板
 └── src/
-    ├── main.rs               # 入口：启动 Redis、后台任务、HTTP 服务
-    ├── lib.rs                # AppState 全局状态、Resp 统一响应体
+    ├── main.rs                         # 入口：Redis 连接、启动后台任务、HTTP 服务
+    ├── lib.rs                          # AppState、Resp 统一响应体
     ├── db/
-    │   ├── mod.rs
-    │   └── redis.rs          # Redis 连接管理（基于 ConnectionManager）
+    │   └── redis.rs                    # Redis 连接管理（ConnectionManager）
     ├── model/
-    │   ├── mod.rs
-    │   └── ip_detail.rs      # IpDetail 数据模型
+    │   └── ip_detail.rs                # IpDetail 数据模型（含 live/died 方法）
     ├── scrapy/
-    │   ├── mod.rs
-    │   ├── crawling_rule.rs  # CrawlingRule 爬取规则结构体（含 source_type）
-    │   └── crawling.rs       # 爬取引擎：HTML 解析 + Raw TXT 解析
+    │   ├── crawling_rule.rs            # CrawlingRule 爬取规则结构体
+    │   └── crawling.rs                 # 爬取引擎：HTML + Raw TXT 解析
     └── service/
-        ├── mod.rs
-        ├── pool.rs           # Pool Semaphore + JoinSet 并发池
-        ├── ip_cache.rs       # API 路由 & Redis 缓存操作
-        └── task.rs           # 后台爬取 + 验证定时任务
+        ├── pool.rs                     # Semaphore + JoinSet 并发池
+        ├── ip_cache.rs                 # Redis 缓存操作 + HTTP 路由处理
+        └── task.rs                     # 后台爬取 + 验证定时任务
 ```
 
 ## 模块说明
 
-### lib.rs — 全局状态 & 响应体
+### `lib.rs` — 全局状态 & 响应体
 
 - `AppState`：全局共享状态，持有 `Arc<Mutex<ConnectionManager>>` 供各模块访问 Redis
 - `Resp<T>`：统一 JSON 响应体，实现 `Responder` trait，自动序列化为 `{"code":0,"msg":"","data":...}`
 
-### db/redis.rs — Redis 连接
+### `db/redis.rs` — Redis 连接
 
-从 `REDIS_URL` 环境变量读取连接地址，默认 `redis://127.0.0.1:6379`，返回 `redis::aio::ConnectionManager`。
+从 `REDIS_URL` 环境变量读取连接地址，默认 `redis://127.0.0.1:6379`。
 
-### model/ip_detail.rs — 数据模型
+### `model/ip_detail.rs` — 数据模型
 
 ```rust
 pub struct IpDetail {
-    pub ip: String,             // IP 地址
-    pub port: String,           // 端口
-    pub protocol_type: String,  // 协议：http / https / socks4 / socks5
-    pub level: String,          // 匿名度：1=高匿 2=普匿 3=匿名 4=透明 5=未知
-    pub region: String,         // 地区
+    pub ip: String,
+    pub port: String,
+    pub protocol_type: String,  // http / https / socks4 / socks5
+    pub level: String,          // 1=高匿 2=普匿 3=匿名 4=透明 5=未知
+    pub region: String,
     pub crawling_time: u64,     // 爬取时间戳（毫秒）
-    pub live_time: u64,         // 有效时长（毫秒，0 表示不限制）
-    pub is_live: bool,          // 是否存活
-    pub verify_count: u32,      // 验证通过次数
-    pub die_verify_count: u32,  // 连续死亡验证次数，超过 10 后删除
+    pub live_time: u64,         // 有效时长（毫秒，0=不限）
+    pub is_live: bool,
+    pub verify_count: u32,
+    pub die_verify_count: u32,  // >10 时删除
 }
 ```
 
-- `live()`：标记为存活，`verify_count +1`，`live_time + 10min`
-- `died()`：标记为死亡，`die_verify_count +1`
+- `live()` — 标记为存活，`verify_count +1`，`live_time + 10min`，`die_verify_count` 归零
+- `died()` — 标记为死亡，`die_verify_count +1`，`live_time` 归零
 
-### scrapy/crawling_rule.rs — 爬取规则
+### `scrapy/crawling.rs` — 爬取引擎
 
-从 JSON 反序列化的爬取规则，包含站点名称、URL 模板（`{page}` 占位符）、最大页数、`source_type`（html / raw）、CSS 选择器规则和文本替换规则。`source_type` 使用 `#[serde(default)]` 兼容旧配置。
+- 根据 `source_type` 分发到 `crawling_html()`（CSS 选择器解析）或 `crawling_raw()`（按行解析 TXT）
+- 支持 `{page}` URL 模板占位符，自动遍历多页
+- 协议归一化：`http` / `https` / `socks4` / `socks5`
+- 匿名度归一化：中文描述 → 数字 1~5
+- 文本替换规则：通过 `replace_rules` 清洗爬取内容
 
-### scrapy/crawling.rs — 爬取引擎
+### `service/pool.rs` — 信号量并发池
 
-- `crawling()`：根据规则的 `source_type` 分发到 `crawling_html()` 或 `crawling_raw()`
-- `crawling_html()`：使用 `reqwest` + `scraper` 解析 HTML，按 CSS 选择器提取 IP、端口、协议、匿名度、地区
-- `crawling_raw()`：直接请求 GitHub 原始 TXT 文件，按行解析 `ip:port` 格式
-- 协议类型归一化：`http` / `https` / `socks4` / `socks5`
-- 匿名度归一化：支持中文描述映射为 1~5 的数字（HTML 源）
-- 超时 10 秒
+组合 `Semaphore`（容量控制）与 `JoinSet`（完成顺序管理）。
 
-### service/pool.rs — 信号量并发池
+- `spawn()` — 获取信号量许可后提交任务
+- `join()` — 通过 `join_next()` 按完成顺序轮询，不会阻塞于前序未完成任务
 
-基于 `tokio::sync::Semaphore` + `tokio::task::JoinSet` 实现。内部使用 `JoinSet` 管理所有已提交任务，`join()` 通过 `join_next()` 按完成顺序轮询，有效任务完成的 IP 不被未完成的前序任务阻塞。
-
-### service/ip_cache.rs — 缓存操作 & API
-
-Redis Hash 存储结构：
-
-```
-key:   ip_cache::{protocol_type}::{level}     （如 ip_cache::http::1）
-field: {ip}:{port}                             （如 123.45.67.89:8080）
-value: JSON 序列化的 IpDetail
-```
-
-关键函数：
+### `service/ip_cache.rs` — 缓存操作 & API
 
 | 函数 | 可见性 | 说明 |
 |---|---|---|
 | `service()` | `pub` | 注册 `/cache/ip` 与 `/cache/count` 路由 |
-| `check_ip()` | `pub` | 格式预检后，通过代理并发请求 3 个目标（baidu / httpbin / google），任一成功即判活 |
-| `ip_in_redis()` | `pub(crate)` | 将代理写入 Redis Hash |
-| `remove_ip()` | `pub` | 从 Redis Hash 中删除代理 |
-| `get_all_ips()` | `pub(crate)` | 获取所有缓存代理用于批量验证 |
+| `check_ip()` | `pub` | 格式预检 + 并发请求 3 个目标验证代理 |
+| `ip_in_redis()` | `pub(crate)` | 写入 Redis Hash |
+| `remove_ip()` | `pub` | 从 Redis Hash 删除 |
+| `get_all_ips()` | `pub(crate)` | 获取所有缓存代理 |
 
-### service/task.rs — 后台任务
+### `service/task.rs` — 后台任务
 
 `start()` 启动两个永久循环：
 
-1. **爬取任务 (crawl_task)**：加载 `crawling_rules.json` 中的规则，逐站点爬取 → 验证 → 写入 Redis，完成后休眠 12 小时
-2. **验证任务 (verify_task)**：每 10 分钟遍历 Redis 中所有代理，存活则更新 `live_time`，死亡计数递增，超过 10 次则删除
+1. **爬取**：加载 `crawling_rules.json` 中 18 个规则，逐源爬取 → 验证 → 写入 Redis。完成后休眠约 12 小时；若可用 IP 为 0 则立即触发。
+2. **验证**：每 10 分钟遍历 Redis 中所有代理，存活则更新 `live_time`，死亡计数递增，超过 10 次则删除。
+
+## 设计要点
+
+- **资源共享**：`Arc<Mutex<ConnectionManager>>` 让所有异步任务安全共享同一个 Redis 连接
+- **规则编译嵌入**：`include_bytes!` 将爬取规则编译进二进制，运行时无需外部配置文件
+- **多阶段构建**：`rust:alpine` 编译 → `alpine:3.21` 运行，`nobody` 用户运行，安全轻量
