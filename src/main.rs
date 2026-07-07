@@ -7,7 +7,7 @@ use ip_pool::service::pool::Pool;
 use log::error;
 use std::sync::{Arc, Mutex};
 
-const POOL_SIZE: usize = 4;
+const DEFAULT_POOL_SIZE: usize = 4;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -25,7 +25,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     let redis = Arc::new(Mutex::new(redis));
-    let size: usize = env::var("POOL_SIZE").map(|s| { s.parse().unwrap_or(POOL_SIZE) }).unwrap_or(POOL_SIZE);
+    let size: usize = env::var("POOL_SIZE").map(|s| { s.parse().unwrap_or(DEFAULT_POOL_SIZE) }).unwrap_or(DEFAULT_POOL_SIZE);
     let pool = Pool::new(size);
 
     task::start(redis.clone(), pool);
@@ -43,7 +43,7 @@ async fn main() -> std::io::Result<()> {
             .service(ip_cache::service())
     })
     .workers(2)
-    .bind(("127.0.0.1", 8080))?
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }
