@@ -3,6 +3,7 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod db;
 pub mod model;
@@ -51,3 +52,12 @@ impl<T: Serialize> Resp<T> {
         }
     }
 }
+
+
+pub fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+

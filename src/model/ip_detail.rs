@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::now_millis;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IpDetail {
@@ -27,7 +28,7 @@ impl IpDetail {
         Self {
             is_live: true,
             verify_count: self.verify_count + 1,
-            live_time: self.live_time + 10 * 60 * 1000,
+            live_time: now_millis() - self.crawling_time,
             die_verify_count: 0,
             ..self
         }

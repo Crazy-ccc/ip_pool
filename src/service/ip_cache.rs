@@ -6,6 +6,7 @@ use redis::{AsyncCommands, RedisResult};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use rand::prelude::{IteratorRandom};
 
 const VERIFY_TARGETS: &[&str] = &[
     "https://www.baidu.com",
@@ -50,13 +51,14 @@ async fn get_ip(
         Err(_) => return Resp::error(404, "ip pool is null"),
     };
 
+    let mut rng = rand::rng();
     for key in keys {
         let result: RedisResult<HashMap<String, String>> =
             AsyncCommands::hgetall(&mut conn, &key).await;
         match result {
             Ok(map) => {
-                for value in map.values() {
-                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value)
+                while let Some(value) = map.iter().choose(&mut rng) {
+                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value.1)
                         && ip.is_live
                         && check_ip(&ip).await {
                         return Resp::success(ip);

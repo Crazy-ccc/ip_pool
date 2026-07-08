@@ -2,14 +2,8 @@ use crate::model::ip_detail::IpDetail;
 use crate::scrapy::crawling_rule::CrawlingRule;
 use scraper::{Html, Selector};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-}
+use std::time::{Duration};
+use crate::now_millis;
 
 fn extract_text(
     element: &scraper::ElementRef,
