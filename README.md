@@ -17,7 +17,8 @@
 |---|---|
 | 语言 | Rust 2024 edition |
 | Web 框架 | actix-web 4 |
-| 数据存储 | Redis (Hash) |
+| 数据存储 | Redis |
+| Redis 客户端 | fred 10.0 |
 | HTTP 客户端 | reqwest（支持 SOCKS 代理） |
 | HTML 解析 | scraper（CSS 选择器） |
 | 运行时 | tokio |
@@ -126,7 +127,7 @@ GET /cache/ip
 GET /cache/count
 ```
 
-返回 Redis 中所有缓存代理的总数（含失效）：
+返回 Redis 中所有存活代理的总数：
 
 ```json
 {
@@ -138,6 +139,8 @@ GET /cache/count
 
 ## Redis 数据模型
 
+### ip_cache（Hash — 存储代理详情）
+
 ```
 Key:     ip_cache::{protocol_type}::{level}
          例如: ip_cache::http::1
@@ -145,6 +148,17 @@ Field:   {ip}:{port}
          例如: 123.45.67.89:8080
 Value:   JSON 序列化的 IpDetail
 ```
+
+### ip_live（Set — 存储存活代理索引）
+
+```
+Key:     ip_live::{protocol_type}::{level}
+         例如: ip_live::http::1
+Member:  {ip}:{port}
+         例如: 123.45.67.89:8080
+```
+
+> 双结构设计：`ip_cache` Hash 存储完整代理详情，`ip_live` Set 仅存储存活代理的 `{ip}:{port}` 索引，查询时先从 Set 随机选取存活成员，再从 Hash 获取详情。写入时同步更新两个结构，删除时同步清理。
 
 ## 数据源
 
@@ -196,7 +210,7 @@ Value:   JSON 序列化的 IpDetail
     ├── main.rs                         # 入口：Redis 连接、启动后台任务、HTTP 服务
     ├── lib.rs                          # AppState、Resp 统一响应体
     ├── db/
-    │   └── redis.rs                    # Redis 连接管理（ConnectionManager）
+    │   └── redis.rs                    # Redis 连接管理（fred::Pool 连接池）
     ├── model/
     │   └── ip_detail.rs                # IpDetail 数据模型（含 live/died 方法）
     ├── scrapy/
@@ -212,12 +226,12 @@ Value:   JSON 序列化的 IpDetail
 
 ### `lib.rs` — 全局状态 & 响应体
 
-- `AppState`：全局共享状态，持有 `Arc<Mutex<ConnectionManager>>` 供各模块访问 Redis
+- `AppState`：全局共享状态，持有 `fred::Pool` 连接池供各模块访问 Redis
 - `Resp<T>`：统一 JSON 响应体，实现 `Responder` trait，自动序列化为 `{"code":0,"msg":"","data":...}`
 
 ### `db/redis.rs` — Redis 连接
 
-从 `REDIS_URL` 环境变量读取连接地址，默认 `redis://127.0.0.1:6379`。
+从 `REDIS_URL` 环境变量读取连接地址，默认 `redis://127.0.0.1:6379`。使用 `fred::Builder` 创建连接池，池大小为 4，初始化后返回 `fred::Pool`。
 
 ### `model/ip_detail.rs` — 数据模型
 
@@ -260,9 +274,10 @@ pub struct IpDetail {
 |---|---|---|
 | `service()` | `pub` | 注册 `/cache/ip` 与 `/cache/count` 路由 |
 | `check_ip()` | `pub` | 格式预检 + 并发请求 3 个目标验证代理 |
-| `ip_in_redis()` | `pub(crate)` | 写入 Redis Hash |
-| `remove_ip()` | `pub` | 从 Redis Hash 删除 |
-| `get_all_ips()` | `pub(crate)` | 获取所有缓存代理 |
+| `ip_in_redis()` | `pub(crate)` | 写入 Redis Hash + 同步更新 ip_live Set |
+| `remove_ip()` | `pub` | 从 Redis Hash 和 ip_live Set 删除 |
+| `get_all_ips()` | `pub(crate)` | 获取所有缓存代理（SCAN 遍历 ip_cache Hash） |
+| `get_live_count()` | `pub` | 获取所有 ip_live Set 中存活代理总数 |
 
 ### `service/task.rs` — 后台任务
 
@@ -273,6 +288,5 @@ pub struct IpDetail {
 
 ## 设计要点
 
-- **资源共享**：`Arc<Mutex<ConnectionManager>>` 让所有异步任务安全共享同一个 Redis 连接
 - **规则编译嵌入**：`include_bytes!` 将爬取规则编译进二进制，运行时无需外部配置文件
 - **多阶段构建**：`rust:alpine` 编译 → `alpine:3.21` 运行，`nobody` 用户运行，安全轻量

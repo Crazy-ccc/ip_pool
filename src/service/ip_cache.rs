@@ -2,7 +2,7 @@ use crate::model::ip_detail::IpDetail;
 use crate::{AppState, Resp};
 use actix_web::{Responder, Scope, web};
 use fred::prelude::*;
-use fred::types::CustomCommand;
+
 use std::collections::HashMap;
 use std::time::Duration;
 use rand::prelude::IteratorRandom;
@@ -12,6 +12,17 @@ const VERIFY_TARGETS: &[&str] = &[
     "https://httpbin.org/ip",
     "http://www.google.com",
 ];
+
+/// Lua script: atomically SRANDMEMBER from a set + HGET from a hash.
+/// KEYS[1] = set_key, KEYS[2] = cache_key.
+/// Returns the HGET result (the JSON-serialized IpDetail), or nil if no member found.
+const LUA_SRANDMEMBER_HGET: &str = r#"
+local member = redis.call('SRANDMEMBER', KEYS[1])
+if member then
+    return redis.call('HGET', KEYS[2], member)
+end
+return nil
+"#;
 
 fn is_valid_ip(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
@@ -47,7 +58,7 @@ async fn get_ip(
     // Direct lookup when both protocol_type and level are specified
     if let (Some(pt), Some(lv)) = (protocol_type, level) {
         let set_key = live_set_key(pt, lv);
-        return match try_get_ip_from_set(&state.redis, &set_key, pt, lv).await {
+        return match try_get_ip_from_set_lua(&state.redis, &set_key, pt, lv).await {
             Some(ip) => Resp::success(ip),
             None => Resp::error(404, "ip pool is null"),
         };
@@ -59,13 +70,12 @@ async fn get_ip(
         None => "ip_live::*".to_string(),
     };
 
-    let keys = match get_keys(&state.redis, &live_set_pattern).await {
+    let keys = match state.live_key_cache.get_or_refresh(&state.redis, &live_set_pattern).await {
         Ok(k) if !k.is_empty() => k,
         _ => return Resp::error(404, "ip pool is null"),
     };
 
     let mut rng = rand::rng();
-    let keys: Vec<String> = keys.iter().filter_map(|k| k.as_str().map(|s| s.to_string())).collect();
 
     for _ in 0..keys.len() {
         if let Some(key) = keys.iter().choose(&mut rng) {
@@ -73,7 +83,7 @@ async fn get_ip(
             if parts.len() >= 3 {
                 let pt = parts[1];
                 let lv = parts[2];
-                if let Some(ip) = try_get_ip_from_set(&state.redis, key, pt, lv).await {
+                if let Some(ip) = try_get_ip_from_set_lua(&state.redis, key, pt, lv).await {
                     return Resp::success(ip);
                 }
             }
@@ -83,14 +93,16 @@ async fn get_ip(
     Resp::error(404, "ip pool is null")
 }
 
-async fn try_get_ip_from_set(redis: &Pool, set_key: &str, protocol_type: &str, level: &str) -> Option<IpDetail> {
-    let member: Option<String> = redis.srandmember(set_key, Some(1usize)).await.ok().flatten();
-    let member = member?;
-
+/// Atomically pick a random member from the live set and fetch its cached detail,
+/// using a single Lua script call (SRANDMEMBER + HGET in one round-trip).
+async fn try_get_ip_from_set_lua(redis: &Pool, set_key: &str, protocol_type: &str, level: &str) -> Option<IpDetail> {
     let cache_key = cache_key(protocol_type, level);
-    let value: Option<String> = redis.hget(&cache_key, &member).await.ok().flatten();
+    let value: Option<String> = redis
+        .eval::<Option<String>, _, _, _>(LUA_SRANDMEMBER_HGET, vec![set_key, &cache_key], Vec::<&str>::new())
+        .await
+        .ok()
+        .flatten();
     let value = value?;
-
     serde_json::from_str::<IpDetail>(&value).ok()
 }
 
@@ -191,7 +203,7 @@ pub async fn check_ip(ip_detail: &IpDetail) -> bool {
 pub(crate) async fn get_all_ips(redis: Pool) -> Vec<IpDetail> {
     let mut ips = Vec::new();
 
-    let keys = match scan_keys(&redis, "ip_cache::*").await {
+    let keys = match scan_keys_public(&redis, "ip_cache::*").await {
         Ok(k) => k,
         Err(_) => return ips,
     };
@@ -211,15 +223,37 @@ pub(crate) async fn get_all_ips(redis: Pool) -> Vec<IpDetail> {
     ips
 }
 
-/// Uses the Redis KEYS command to find all matching keys.
-async fn get_keys(pool: &Pool, pattern: &str) -> Result<Vec<Key>, Error> {
-    let cmd = CustomCommand::new_static("KEYS", fred::types::ClusterHash::default(), false);
-    pool.custom(cmd, vec![pattern]).await
+/// Uses the Redis SCAN command to find all matching keys (production-safe).
+async fn get_keys(pool: &Pool, pattern: &str) -> Result<Vec<String>, Error> {
+    let mut keys = Vec::new();
+    let mut cursor = "0".to_string();
+    loop {
+        let result: Value = pool.scan_page(cursor.clone(), pattern, Some(100u32), None).await?;
+        match result {
+            Value::Array(ref arr) if arr.len() >= 2 => {
+                if let Some(c) = arr[0].as_str() {
+                    cursor = c.to_string();
+                }
+                if let Value::Array(ref key_arr) = arr[1] {
+                    for key_val in key_arr {
+                        if let Some(s) = key_val.as_str() {
+                            keys.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            _ => break,
+        }
+        if cursor == "0" {
+            break;
+        }
+    }
+    Ok(keys)
 }
 
 /// Scan keys using SCAN command (production-safe).
 /// Uses scan_page to iterate through all matching keys.
-async fn scan_keys(pool: &Pool, pattern: &str) -> Result<Vec<String>, Error> {
+pub async fn scan_keys_public(pool: &Pool, pattern: &str) -> Result<Vec<String>, Error> {
     let mut keys = Vec::new();
     let mut cursor = "0".to_string();
     loop {

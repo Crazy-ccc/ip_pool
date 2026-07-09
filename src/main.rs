@@ -4,6 +4,7 @@ use ip_pool::AppState;
 use ip_pool::db::redis::connect_redis;
 use ip_pool::service::{ip_cache, task};
 use ip_pool::service::pool::Pool;
+use ip_pool::LiveKeyCache;
 use log::error;
 
 const DEFAULT_POOL_SIZE: usize = 4;
@@ -28,7 +29,10 @@ async fn main() -> std::io::Result<()> {
 
     task::start(redis.clone(), pool);
 
-    let state = web::Data::new(AppState { redis });
+    let state = web::Data::new(AppState {
+        redis,
+        live_key_cache: LiveKeyCache::new(10),
+    });
 
     HttpServer::new(move || {
         App::new()
