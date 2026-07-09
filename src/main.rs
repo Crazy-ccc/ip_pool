@@ -5,7 +5,6 @@ use ip_pool::db::redis::connect_redis;
 use ip_pool::service::{ip_cache, task};
 use ip_pool::service::pool::Pool;
 use log::error;
-use std::sync::{Arc, Mutex};
 
 const DEFAULT_POOL_SIZE: usize = 4;
 
@@ -24,7 +23,6 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    let redis = Arc::new(Mutex::new(redis));
     let size: usize = env::var("POOL_SIZE").map(|s| { s.parse().unwrap_or(DEFAULT_POOL_SIZE) }).unwrap_or(DEFAULT_POOL_SIZE);
     let pool = Pool::new(size);
 

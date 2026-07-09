@@ -1,12 +1,11 @@
 use crate::model::ip_detail::IpDetail;
 use crate::{AppState, Resp};
 use actix_web::{Responder, Scope, web};
-use redis::aio::ConnectionManager;
-use redis::{AsyncCommands, RedisResult};
+use fred::prelude::*;
+use fred::types::CustomCommand;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use rand::prelude::{IteratorRandom};
+use rand::prelude::IteratorRandom;
 
 const VERIFY_TARGETS: &[&str] = &[
     "https://www.baidu.com",
@@ -23,6 +22,14 @@ fn is_valid_port(s: &str) -> bool {
     s.parse::<u16>().map_or(false, |p| p > 0)
 }
 
+fn live_set_key(protocol_type: &str, level: &str) -> String {
+    format!("ip_live::{}::{}", protocol_type, level)
+}
+
+fn cache_key(protocol_type: &str, level: &str) -> String {
+    format!("ip_cache::{}::{}", protocol_type, level)
+}
+
 pub fn service() -> Scope {
     web::scope("/cache")
         .route("/ip", web::get().to(get_ip))
@@ -34,87 +41,112 @@ async fn get_ip(
     state: web::Data<AppState>,
 ) -> impl Responder {
     let query = query.into_inner();
+    let protocol_type = query.get("protocol_type");
+    let level = query.get("level");
 
-    let mut search = "ip_cache::*".to_string();
-    if let Some(protocol_type) = query.get("protocol_type") {
-        search = format!("ip_cache::{}::*", protocol_type);
-    }
-    if let Some(level) = query.get("level") && let Some(protocol_type) = query.get("protocol_type") {
-        search = format!("ip_cache::{}::{}", protocol_type, level);
+    // Direct lookup when both protocol_type and level are specified
+    if let (Some(pt), Some(lv)) = (protocol_type, level) {
+        let set_key = live_set_key(pt, lv);
+        return match try_get_ip_from_set(&state.redis, &set_key, pt, lv).await {
+            Some(ip) => Resp::success(ip),
+            None => Resp::error(404, "ip pool is null"),
+        };
     }
 
-    let mut conn = state.redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let keys: RedisResult<Vec<String>> =
-        AsyncCommands::keys(&mut conn, search).await;
-    let keys = match keys {
-        Ok(k) => k,
-        Err(_) => return Resp::error(404, "ip pool is null"),
+    // Wildcard pattern: get matching live set keys
+    let live_set_pattern = match protocol_type {
+        Some(pt) => format!("ip_live::{}::*", pt),
+        None => "ip_live::*".to_string(),
+    };
+
+    let keys = match get_keys(&state.redis, &live_set_pattern).await {
+        Ok(k) if !k.is_empty() => k,
+        _ => return Resp::error(404, "ip pool is null"),
     };
 
     let mut rng = rand::rng();
-    for key in keys {
-        let result: RedisResult<HashMap<String, String>> =
-            AsyncCommands::hgetall(&mut conn, &key).await;
-        match result {
-            Ok(map) => {
-                while let Some(value) = map.iter().choose(&mut rng) {
-                    if let Ok(ip) = serde_json::from_str::<IpDetail>(&value.1)
-                        && ip.is_live
-                        && check_ip(&ip).await {
-                        return Resp::success(ip);
-                    }
+    let keys: Vec<String> = keys.iter().filter_map(|k| k.as_str().map(|s| s.to_string())).collect();
+
+    for _ in 0..keys.len() {
+        if let Some(key) = keys.iter().choose(&mut rng) {
+            let parts: Vec<&str> = key.split("::").collect();
+            if parts.len() >= 3 {
+                let pt = parts[1];
+                let lv = parts[2];
+                if let Some(ip) = try_get_ip_from_set(&state.redis, key, pt, lv).await {
+                    return Resp::success(ip);
                 }
             }
-            Err(_) => {}
         }
     }
 
     Resp::error(404, "ip pool is null")
 }
 
-async fn get_count(state: web::Data<AppState>,) -> impl Responder {
-    let mut count = 0;
-    let mut conn = state.redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let keys: RedisResult<Vec<String>> =
-        AsyncCommands::keys(&mut conn, "ip_cache::*").await;
-    let keys = match keys {
+async fn try_get_ip_from_set(redis: &Pool, set_key: &str, protocol_type: &str, level: &str) -> Option<IpDetail> {
+    let member: Option<String> = redis.srandmember(set_key, Some(1usize)).await.ok().flatten();
+    let member = member?;
+
+    let cache_key = cache_key(protocol_type, level);
+    let value: Option<String> = redis.hget(&cache_key, &member).await.ok().flatten();
+    let value = value?;
+
+    serde_json::from_str::<IpDetail>(&value).ok()
+}
+
+async fn get_count(state: web::Data<AppState>) -> impl Responder {
+    let keys = match get_keys(&state.redis, "ip_live::*").await {
         Ok(k) => k,
         Err(_) => return Resp::error(404, "ip pool is null"),
     };
 
+    let mut count = 0i64;
     for key in keys {
-        count += AsyncCommands::hlen(&mut conn, key).await.unwrap_or(0);
+        if let Ok(len) = state.redis.scard::<i64, _>(key).await {
+            count += len;
+        }
     }
 
-    Resp::success(count)
+    Resp::success(count as usize)
 }
 
-pub async fn get_live_count(redis: Arc<Mutex<ConnectionManager>>) -> usize {
-    get_all_ips(redis).await.iter().filter(|ip| ip.is_live).count()
+pub async fn get_live_count(redis: Pool) -> usize {
+    let keys = match get_keys(&redis, "ip_live::*").await {
+        Ok(k) => k,
+        Err(_) => return 0,
+    };
+    let mut count = 0i64;
+    for key in keys {
+        if let Ok(len) = redis.scard::<i64, _>(key).await {
+            count += len;
+        }
+    }
+    count as usize
 }
 
-pub(crate) async fn ip_in_redis(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) {
+pub(crate) async fn ip_in_redis(redis: Pool, ip_detail: IpDetail) {
     let data = serde_json::to_string(&ip_detail).unwrap_or_else(|_| "".to_string());
-
-    let (key, h_key,mut conn) = get_conn_and_key_data(redis, ip_detail);
-
-    let _: RedisResult<String> = AsyncCommands::hset(&mut conn, &key, &h_key, &data).await;
-}
-
-pub async fn remove_ip(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) {
-    let (key, h_key, mut conn) = get_conn_and_key_data(redis, ip_detail);
-
-    let _: RedisResult<String> = AsyncCommands::hdel(&mut conn, &key, &h_key).await;
-}
-
-fn get_conn_and_key_data(redis: Arc<Mutex<ConnectionManager>>, ip_detail: IpDetail) -> (String, String,ConnectionManager) {
-    let key = format!("ip_cache::{}::{}", ip_detail.protocol_type, ip_detail.level);
-
+    let key = cache_key(&ip_detail.protocol_type, &ip_detail.level);
     let h_key = format!("{}:{}", ip_detail.ip, ip_detail.port);
 
-    let conn = redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let _ = redis.hset::<i64, _, _>(&key, (&h_key, &data)).await;
 
-    (key, h_key, conn)
+    let live_key = live_set_key(&ip_detail.protocol_type, &ip_detail.level);
+    if ip_detail.is_live {
+        let _ = redis.sadd::<i64, _, _>(&live_key, &h_key).await;
+    } else {
+        let _ = redis.srem::<i64, _, _>(&live_key, &h_key).await;
+    }
+}
+
+pub async fn remove_ip(redis: Pool, ip_detail: IpDetail) {
+    let key = cache_key(&ip_detail.protocol_type, &ip_detail.level);
+    let h_key = format!("{}:{}", ip_detail.ip, ip_detail.port);
+
+    let _ = redis.hdel::<i64, _, _>(&key, &h_key).await;
+
+    let live_key = live_set_key(&ip_detail.protocol_type, &ip_detail.level);
+    let _ = redis.srem::<i64, _, _>(&live_key, &h_key).await;
 }
 
 pub async fn check_ip(ip_detail: &IpDetail) -> bool {
@@ -164,28 +196,60 @@ pub async fn check_ip(ip_detail: &IpDetail) -> bool {
     h1.await.unwrap_or(false) || h2.await.unwrap_or(false) || h3.await.unwrap_or(false)
 }
 
-pub(crate) async fn get_all_ips(redis: Arc<Mutex<ConnectionManager>>) -> Vec<IpDetail> {
+pub(crate) async fn get_all_ips(redis: Pool) -> Vec<IpDetail> {
     let mut ips = Vec::new();
-    let mut conn = redis.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let keys: RedisResult<Vec<String>> =
-        AsyncCommands::keys(&mut conn, "ip_cache::*").await;
-    let keys = match keys {
+
+    let keys = match scan_keys(&redis, "ip_cache::*").await {
         Ok(k) => k,
         Err(_) => return ips,
     };
 
     for key in keys {
-        let members: RedisResult<Vec<String>> =
-            AsyncCommands::hgetall(&mut conn, &key).await;
+        let members: Result<HashMap<String, String>, Error> = redis.hgetall(&key).await;
         let members = match members {
             Ok(m) => m,
             Err(_) => continue,
         };
-        for member in members {
-            if let Ok(detail) = serde_json::from_str::<IpDetail>(&member) {
+        for (_, value) in members {
+            if let Ok(detail) = serde_json::from_str::<IpDetail>(&value) {
                 ips.push(detail);
             }
         }
     }
     ips
+}
+
+/// Uses the Redis KEYS command to find all matching keys.
+async fn get_keys(pool: &Pool, pattern: &str) -> Result<Vec<Key>, Error> {
+    let cmd = CustomCommand::new_static("KEYS", fred::types::ClusterHash::default(), false);
+    pool.custom(cmd, vec![pattern]).await
+}
+
+/// Scan keys using SCAN command (production-safe).
+/// Uses scan_page to iterate through all matching keys.
+async fn scan_keys(pool: &Pool, pattern: &str) -> Result<Vec<String>, Error> {
+    let mut keys = Vec::new();
+    let mut cursor = "0".to_string();
+    loop {
+        let result: Value = pool.scan_page(cursor.clone(), pattern, Some(100u32), None).await?;
+        match result {
+            Value::Array(ref arr) if arr.len() >= 2 => {
+                if let Some(c) = arr[0].as_str() {
+                    cursor = c.to_string();
+                }
+                if let Value::Array(ref key_arr) = arr[1] {
+                    for key_val in key_arr {
+                        if let Some(s) = key_val.as_str() {
+                            keys.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            _ => break,
+        }
+        if cursor == "0" {
+            break;
+        }
+    }
+    Ok(keys)
 }

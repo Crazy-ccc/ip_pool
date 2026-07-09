@@ -1,8 +1,7 @@
 use actix_web::http::header::ContentType;
 use actix_web::{HttpRequest, HttpResponse, Responder};
-use redis::aio::ConnectionManager;
+use fred::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod db;
@@ -12,7 +11,7 @@ pub mod service;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub redis: Arc<Mutex<ConnectionManager>>,
+    pub redis: Pool,
 }
 
 // response body

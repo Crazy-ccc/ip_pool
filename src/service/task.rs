@@ -3,12 +3,12 @@ use crate::scrapy::crawling;
 use crate::scrapy::crawling_rule::CrawlingRule;
 use crate::service::ip_cache;
 use crate::service::pool::Pool;
+use fred::prelude::Pool as FredPool;
 use log::{error, info};
-use redis::aio::ConnectionManager;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub fn start(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) {
+pub fn start(redis: FredPool, pool: Pool) {
     let mut counter = 0;
     tokio::spawn(async move {
         loop {
@@ -28,7 +28,7 @@ pub fn start(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) {
     });
 }
 
-async fn crawl_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result<(), String> {
+async fn crawl_task(redis: FredPool, pool: Pool) -> Result<(), String> {
     info!("crawl task start");
 
     let json = include_bytes!("../../resource/crawling_rules.json");
@@ -59,7 +59,7 @@ async fn crawl_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result<
     Ok(())
 }
 
-async fn verify_task(redis: Arc<Mutex<ConnectionManager>>, pool: Pool) -> Result<(), String> {
+async fn verify_task(redis: FredPool, pool: Pool) -> Result<(), String> {
     info!("verify task start");
 
     let ips = ip_cache::get_all_ips(redis.clone()).await;
