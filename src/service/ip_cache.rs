@@ -95,19 +95,11 @@ async fn try_get_ip_from_set(redis: &Pool, set_key: &str, protocol_type: &str, l
 }
 
 async fn get_count(state: web::Data<AppState>) -> impl Responder {
-    let keys = match get_keys(&state.redis, "ip_live::*").await {
-        Ok(k) => k,
-        Err(_) => return Resp::error(404, "ip pool is null"),
-    };
-
-    let mut count = 0i64;
-    for key in keys {
-        if let Ok(len) = state.redis.scard::<i64, _>(key).await {
-            count += len;
-        }
+    let count = get_live_count(state.redis.clone()).await;
+    if count == 0 {
+        return Resp::error(404, "ip pool is null")
     }
-
-    Resp::success(count as usize)
+    Resp::success(count)
 }
 
 pub async fn get_live_count(redis: Pool) -> usize {
